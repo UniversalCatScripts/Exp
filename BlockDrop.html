@@ -1,0 +1,107 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>BlockDrop</title>
+<style>
+:root{--bg:#080b1d;--panel:#111936;--line:#254b9a;--cyan:#27c9ff;--purple:#b34cff;--text:#f4f7ff}
+*{box-sizing:border-box}
+body{margin:0;min-height:100vh;background:radial-gradient(ellipse at top,#17265a 0%,#080b1d 58%);color:var(--text);font-family:system-ui,Segoe UI,sans-serif;display:flex;justify-content:center;align-items:center;padding:18px}
+.app{width:min(960px,100%);display:grid;grid-template-columns:170px minmax(260px,1fr) 170px;gap:16px;align-items:start}
+h1{grid-column:1/-1;text-align:center;margin:0 0 4px;font-size:clamp(2rem,6vw,3.4rem);letter-spacing:2px;text-shadow:0 0 18px #8c4dff}
+h1 span{color:#c36bff}
+.panel{background:linear-gradient(145deg,#121d40,#0b122b);border:1px solid var(--line);border-radius:15px;padding:15px;box-shadow:0 0 22px #1554a633;margin-bottom:14px;text-align:center}
+.panel h2{font-size:1rem;color:#9fc8ff;margin:0 0 8px}
+.value{font-size:2rem;font-weight:800}
+#boardWrap{position:relative;border:3px solid var(--cyan);border-radius:12px;padding:5px;background:#05091a;box-shadow:0 0 24px #1caeff66}
+canvas{display:block;width:100%;height:auto;image-rendering:pixelated}
+#overlay{position:absolute;inset:5px;display:none;align-items:center;justify-content:center;flex-direction:column;background:#05091add;text-align:center}
+#overlay strong{font-size:2rem;color:#ff6c9e}
+#overlay button{margin-top:12px}
+button{border:1px solid #348fff;background:linear-gradient(145deg,#153b8c,#10265b);color:white;border-radius:12px;padding:13px 16px;font-size:1rem;font-weight:700;cursor:pointer;touch-action:manipulation;box-shadow:0 4px 14px #006dff33}
+button:active{transform:translateY(2px);filter:brightness(1.25)}
+button:focus-visible{outline:3px solid #fff;outline-offset:2px}
+.actions{display:grid;grid-template-columns:repeat(4,1fr);gap:9px;margin-top:12px}
+.actions button{font-size:1.35rem;padding:13px 5px}
+.wide{width:100%;margin-top:9px}
+.small{font-size:.85rem;color:#b9c8e8;line-height:1.5}
+#next{width:100%;max-width:120px;margin:auto;display:block}
+kbd{background:#26365f;border-radius:4px;padding:2px 5px}
+@media(max-width:650px){body{padding:10px;align-items:flex-start}.app{grid-template-columns:1fr 1fr;gap:9px}h1{grid-column:1/-1}.boardCol{grid-column:1/-1;grid-row:2}.leftCol{grid-column:1;grid-row:3}.rightCol{grid-column:2;grid-row:3}.panel{padding:10px;margin-bottom:8px}.value{font-size:1.5rem}.actions{gap:6px}.actions button{padding:12px 3px}}
+</style>
+</head>
+<body>
+<main class="app">
+<h1>BLOCK<span>DROP</span></h1>
+<section class="leftCol">
+ <div class="panel"><h2>SCORE</h2><div class="value" id="score">0</div></div>
+ <div class="panel"><h2>HIGH SCORE</h2><div class="value" id="high">0</div></div>
+ <div class="panel"><h2>LEVEL</h2><div class="value" id="level">1</div></div>
+ <button class="wide" id="startBtn">▶ New game</button>
+</section>
+<section class="boardCol">
+ <div id="boardWrap">
+  <canvas id="board" width="300" height="600" aria-label="Tetris game board"></canvas>
+  <div id="overlay"><strong>GAME OVER</strong><div id="finalScore">Score: 0</div><button id="againBtn">Play again</button></div>
+ </div>
+ <div class="actions">
+  <button id="left" aria-label="Move left">◀</button>
+  <button id="rotate" aria-label="Rotate">⟳</button>
+  <button id="right" aria-label="Move right">▶</button>
+  <button id="down" aria-label="Soft drop">▼</button>
+ </div>
+ <button class="wide" id="drop">⤓ Hard drop</button>
+</section>
+<section class="rightCol">
+ <div class="panel"><h2>NEXT PIECE</h2><canvas id="next" width="120" height="100"></canvas></div>
+ <div class="panel"><h2>HOW TO PLAY</h2><div class="small">Complete full rows to score points.<br><br><kbd>←</kbd> <kbd>→</kbd> Move<br><kbd>↑</kbd> Rotate<br><kbd>↓</kbd> Soft drop<br><kbd>Space</kbd> Hard drop<br><kbd>P</kbd> Pause</div></div>
+ <div class="panel"><h2>STATUS</h2><div id="status" class="small">Press New game to start.</div></div>
+</section>
+</main>
+<script>
+(()=>{
+const COLS=10,ROWS=20,canvas=document.getElementById('board'),ctx=canvas.getContext('2d'),nctx=document.getElementById('next').getContext('2d');
+const colors=[null,'#31b7ff','#ffd12e','#a94cff','#ff5268','#43e66b','#ff8b32','#21d7d0'];
+const shapes=[
+ [[1,1,1,1]],
+ [[2,2],[2,2]],
+ [[0,3,0],[3,3,3]],
+ [[4,0,0],[4,4,4]],
+ [[0,0,5],[5,5,5]],
+ [[0,6,6],[6,6,0]],
+ [[7,7,0],[0,7,7]]
+];
+let grid,piece,next,score=0,lines=0,level=1,dropCounter=0,last=0,interval=850,running=false,paused=false,raf=0;
+let high=Number(localStorage.getItem('blockdropHigh')||0);
+const $=id=>document.getElementById(id);
+$('high').textContent=high;
+function empty(){return Array.from({length:ROWS},()=>Array(COLS).fill(0))}
+function randomPiece(){let m=shapes[Math.floor(Math.random()*shapes.length)].map(r=>r.slice());return {m,x:Math.floor((COLS-m[0].length)/2),y:0}}
+function rotate(m){return m[0].map((_,i)=>m.map(row=>row[i]).reverse())}
+function collide(p,dx=0,dy=0,m=p.m){for(let y=0;y<m.length;y++)for(let x=0;x<m[y].length;x++)if(m[y][x]){let nx=p.x+x+dx,ny=p.y+y+dy;if(nx<0||nx>=COLS||ny>=ROWS||(ny>=0&&grid[ny][nx]))return true}return false}
+function drawCell(c,x,y,size,context){if(!c)return;context.fillStyle=colors[c];context.fillRect(x*size+1,y*size+1,size-2,size-2);context.fillStyle='rgba(255,255,255,.22)';context.fillRect(x*size+3,y*size+3,size-6,Math.max(3,size*.12));context.strokeStyle='rgba(0,0,0,.35)';context.strokeRect(x*size+1,y*size+1,size-2,size-2)}
+function draw(){ctx.fillStyle='#05091a';ctx.fillRect(0,0,300,600);let s=30;for(let y=0;y<ROWS;y++)for(let x=0;x<COLS;x++){ctx.strokeStyle='#14264c';ctx.strokeRect(x*s,y*s,s,s);drawCell(grid[y][x],x,y,s,ctx)}if(piece)for(let y=0;y<piece.m.length;y++)for(let x=0;x<piece.m[y].length;x++)if(piece.m[y][x])drawCell(piece.m[y][x],piece.x+x,piece.y+y,s,ctx);drawNext()}
+function drawNext(){nctx.clearRect(0,0,120,100);if(!next)return;let s=23,w=next.m[0].length*s,h=next.m.length*s,ox=(120-w)/2,oy=(100-h)/2;for(let y=0;y<next.m.length;y++)for(let x=0;x<next.m[y].length;x++)if(next.m[y][x]){nctx.fillStyle=colors[next.m[y][x]];nctx.fillRect(ox+x*s+1,oy+y*s+1,s-2,s-2);nctx.fillStyle='rgba(255,255,255,.25)';nctx.fillRect(ox+x*s+3,oy+y*s+3,s-6,4)}}
+function update(){ $('score').textContent=score.toLocaleString();$('level').textContent=level;$('high').textContent=high}
+function spawn(){piece=next||randomPiece();piece.x=Math.floor((COLS-piece.m[0].length)/2);piece.y=0;next=randomPiece();if(collide(piece)){endGame()}draw()}
+function lock(){for(let y=0;y<piece.m.length;y++)for(let x=0;x<piece.m[y].length;x++)if(piece.m[y][x]){let yy=piece.y+y;if(yy<0){endGame();return}grid[yy][piece.x+x]=piece.m[y][x]}
+let cleared=0;for(let y=ROWS-1;y>=0;y--)if(grid[y].every(Boolean)){grid.splice(y,1);grid.unshift(Array(COLS).fill(0));cleared++;y++}
+if(cleared){lines+=cleared;score+=[0,100,300,500,800][cleared]*level;level=1+Math.floor(lines/10);interval=Math.max(110,850-(level-1)*65);update()}
+spawn()}
+function step(){if(!running||paused)return;if(!collide(piece,0,1))piece.y++;else lock();draw()}
+function loop(t=0){if(!running)return;let dt=t-last;last=t;if(!paused){dropCounter+=dt;if(dropCounter>interval){step();dropCounter=0}}raf=requestAnimationFrame(loop)}
+function start(){cancelAnimationFrame(raf);grid=empty();score=0;lines=0;level=1;interval=850;dropCounter=0;running=true;paused=false;next=randomPiece();$('overlay').style.display='none';$('status').textContent='Playing';update();spawn();last=performance.now();raf=requestAnimationFrame(loop)}
+function endGame(){running=false;cancelAnimationFrame(raf);if(score>high){high=score;localStorage.setItem('blockdropHigh',high)}update();$('finalScore').textContent='Score: '+score;$('overlay').style.display='flex';$('status').textContent='Game over'}
+function move(dx){if(!running||paused)return;if(!collide(piece,dx,0))piece.x+=dx;draw()}
+function turn(){if(!running||paused)return;let m=rotate(piece.m),old=piece.m;for(let kick of [0,-1,1,-2,2])if(!collide(piece,kick,0,m)){piece.m=m;piece.x+=kick;break}draw()}
+function soft(){if(!running||paused)return;if(!collide(piece,0,1)){piece.y++;score+=1;update()}else lock();draw()}
+function hard(){if(!running||paused)return;let d=0;while(!collide(piece,0,1)){piece.y++;d++}score+=d*2;update();lock();draw()}
+function pause(){if(!running)return;paused=!paused;$('status').textContent=paused?'Paused':'Playing';if(!paused){last=performance.now();dropCounter=0}}
+$('left').onclick=()=>move(-1);$('right').onclick=()=>move(1);$('rotate').onclick=turn;$('down').onclick=soft;$('drop').onclick=hard;$('startBtn').onclick=start;$('againBtn').onclick=start;
+document.addEventListener('keydown',e=>{if(['ArrowLeft','ArrowRight','ArrowUp','ArrowDown',' '].includes(e.key))e.preventDefault();if(e.key==='ArrowLeft')move(-1);else if(e.key==='ArrowRight')move(1);else if(e.key==='ArrowUp')turn();else if(e.key==='ArrowDown')soft();else if(e.code==='Space')hard();else if(e.key.toLowerCase()==='p')pause();else if(e.key==='Enter'&&!running)start()});
+grid=empty();draw();update();
+})();
+</script>
+</body>
+</html>
